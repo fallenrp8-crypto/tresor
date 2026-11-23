@@ -312,11 +312,11 @@ function renderLobby(me) {
 
   document.querySelectorAll('.host-only').forEach((e) => e.classList.toggle('hidden', !host));
   $('waitInfo').classList.toggle('hidden', host);
-  const missingGps = tr.filter((p) => !p.gps).map((p) => p.name);
+  const missingGps = state.players.filter((p) => !p.gps).map((p) => p.name);
   let why = '';
   if (nT !== s.treasureCount) why = `Il faut ${s.treasureCount} trésor(s) (${nT} choisi(s))`;
   else if (nC < 1) why = 'Il faut au moins 1 chercheur';
-  else if (missingGps.length) why = `GPS manquant : ${missingGps.join(', ')}`;
+  else if (missingGps.length) why = `Localisation requise — demande à ces joueurs de l’activer : ${missingGps.join(', ')}`;
   $('btnStart').disabled = !!why;
   $('btnStart').textContent = why || '🚀 Lancer la partie';
 }
@@ -360,7 +360,7 @@ function hudTick() {
   const wait = capLockUntil - Date.now();
   cap.disabled = hiding || wait > 0;
   cap.classList.toggle('ready', !cap.disabled);
-  cap.textContent = hiding ? 'CAPTURER 🔒' : wait > 0 ? `CAPTURER (${Math.ceil(wait / 1000)})` : 'CAPTURER';
+  cap.textContent = hiding ? 'CAPTURER 🔒' : wait > 0 ? `CAPTURER (${fmt(wait)})` : 'CAPTURER';
 
   // Trésor : alerte s'il sort (ou s'approche du bord) de sa zone, ou si son GPS ne part plus
   const z = !hiding && me.role === 'tresor' && state.zones.find((x) => x.id === me.id);
@@ -580,7 +580,17 @@ $('btnShare').onclick = async () => {
     else { await navigator.clipboard.writeText(url); toast('🔗 Lien copié !'); }
   } catch { toast(`Code de la partie : ${state.code}`); }
 };
-const leave = () => { if (confirm('Quitter la partie ?')) act('leave').catch(() => {}).finally(() => logout()); };
+const leave = async () => {
+  if (!session || !confirm('Quitter la partie ?')) return;
+  const leavingSession = session;
+  try {
+    await api('action', { code: leavingSession.code, token: leavingSession.token, type: 'leave' });
+  } catch (e) {
+    showErr(e);
+    return;
+  }
+  if (session === leavingSession) logout('Tu as quitté la partie.');
+};
 $('btnLeave').onclick = leave;
 $('btnLeave2').onclick = leave;
 $('btnQuit').onclick = leave;
@@ -592,7 +602,7 @@ $('btnMe').onclick = () => {
 };
 $('btnZone').onclick = fitZones;
 $('btnCapture').onclick = () => {
-  capLockUntil = Date.now() + 3000; // bloque tout de suite, le serveur précise le délai
+      capLockUntil = Date.now() + 3000; // bloque immédiatement, le serveur précise ensuite la pénalité
   hudTick();
   act('capture')
     .then((r) => {
