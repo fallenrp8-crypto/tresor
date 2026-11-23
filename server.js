@@ -24,7 +24,7 @@ const STALE_MS = 30000;            // position « périmée » (affichage grisé
 const OFFLINE_MS = 90000;          // trésor sans GPS depuis 90 s => révélé et capturable à sa dernière position
 const CAPTURE_FRESH_MS = 20000;    // le chercheur doit avoir une position récente
 const CAPTURE_COOLDOWN_MS = 3000;  // entre deux essais réussis / délai minimum
-const CAPTURE_FAIL_MS = 10000;     // pénalité après un essai raté (le bouton ne sert pas de détecteur)
+const CAPTURE_FAIL_MINUTES = [5, 8, 10, 13, 15, 18, 20];
 const CAPTURE_TOLERANCE_MAX = 10;  // tolérance GPS maximale ajoutée à la distance de capture (m)
 const MAX_SPEED = 12;              // m/s : au-delà, saut GPS ignoré pour la distance parcourue
 const MAX_GAMES = 300;
@@ -131,7 +131,7 @@ const revealed = (p) => p.out || p.offline;
 /* ------------------------------------------------------------ Joueurs */
 function resetPlayerForGame(p) {
   Object.assign(p, {
-    outSince: null, out: false, offline: false, captures: 0, capturedBy: null, capturedAt: null,
+    outSince: null, out: false, offline: false, captures: 0, captureFails: 0, capturedBy: null, capturedAt: null,
     zone: null, zoneIdx: -1, walked: 0, track: null, capBlockUntil: 0,
   });
 }
@@ -231,10 +231,11 @@ function canSee(me, q, status) {
   if (me === q) return true;
   if (status === 'ended') return true;
   if (status === 'lobby') return false;                         // au salon : chacun ne voit que soi
+  if (q.role === 'tresor' && q.offline) return false;          // garde la zone, masque la dernière position
   if (me.role === 'elimine') return true;
   if (q.role === me.role) return true;                          // coéquipiers
   if (me.role === 'tresor' && q.role === 'chercheur') return true; // trésors : chercheurs en temps réel
-  if (me.role === 'chercheur' && q.role === 'tresor') return revealed(q);
+  if (me.role === 'chercheur' && q.role === 'tresor') return q.out;
   return false;
 }
 
@@ -309,8 +310,8 @@ function doAction(g, p, b, now) {
       const s = g.settings, list = [...g.players.values()], tr = treasures(g);
       if (tr.length !== s.treasureCount) fail(400, `Il faut exactement ${s.treasureCount} trésor(s) (actuellement ${tr.length})`);
       if (!list.some((q) => q.role === 'chercheur')) fail(400, 'Il faut au moins un chercheur');
-      const noGps = tr.filter((q) => !fresh(q, now, 120000)).map((q) => q.name);
-      if (noGps.length) fail(400, `Pas de position GPS pour : ${noGps.join(', ')}`);
+      const noGps = list.filter((q) => !fresh(q, now, 120000)).map((q) => q.name);
+      if (noGps.length) fail(400, `Localisation requise — demande à ces joueurs de l’activer : ${noGps.join(', ')}`);
       list.forEach(resetPlayerForGame);
       Object.assign(g, {
         status: 'running', phase: 'hide', startAt: now, hideEndAt: now + s.hideTime * 60000,
@@ -338,8 +339,10 @@ function doAction(g, p, b, now) {
       }
       const tol = best ? Math.min(CAPTURE_TOLERANCE_MAX, ((p.pos.acc || 0) + (best.pos.acc || 0)) / 2) : 0;
       if (!best || bd > g.settings.captureDist + tol) {
-        p.capBlockUntil = now + CAPTURE_FAIL_MS;
-        return { ok: false, msg: '❌ Raté ! Aucun trésor à portée (10 s de pénalité)', capBlockUntil: p.capBlockUntil };
+        p.captureFails++;
+        const minutes = CAPTURE_FAIL_MINUTES[Math.min(p.captureFails - 1, CAPTURE_FAIL_MINUTES.length - 1)];
+        p.capBlockUntil = now + minutes * 60000;
+        return { ok: false, msg: `❌ Raté ! Pénalité : ${minutes} min (${p.captureFails}e échec)`, capBlockUntil: p.capBlockUntil };
       }
       p.capBlockUntil = now + CAPTURE_COOLDOWN_MS;
       best.role = g.settings.captureMode === 'eliminate' ? 'elimine' : 'chercheur';
@@ -367,6 +370,13 @@ function doAction(g, p, b, now) {
     }
     case 'leave':
       event(g, `👋 ${p.name} est parti`);
+      if (g.status === 'running' && p.role === 'tresor') {
+        p.offline = true;
+        if (p.pos) p.pos.t = now - OFFLINE_MS - 1;
+        for (const r of p.conns) r.end();
+        p.conns.clear();
+        return null;
+      }
       removePlayer(g, p);
       return null;
     default:
