@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Chasse au trésor</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="map"></div>
+  <div id="gps" class="hidden"></div>
+  <div id="toasts"></div>
+
+  <!-- ===== Accueil ===== -->
+  <section id="home" class="screen">
+    <div class="card">
+      <h1>🏴‍☠️ Chasse au trésor</h1>
+      <p class="sub">4 trésors se cachent, 4 zones se resserrent. Les chercheurs ont 2 heures pour tous les trouver.</p>
+      <label>Ton pseudo<input id="name" maxlength="20" autocomplete="nickname" placeholder="ex : Angel"></label>
+      <button id="btnCreate" class="primary">Créer une partie</button>
+      <div class="or">— ou rejoindre —</div>
+      <div class="row">
+        <input id="joinCode" placeholder="CODE" maxlength="4" autocapitalize="characters" autocomplete="off">
+        <button id="btnJoin">Rejoindre</button>
+      </div>
+      <p id="homeErr" class="err"></p>
+    </div>
+  </section>
+
+  <!-- ===== Salon ===== -->
+  <section id="lobby" class="panel hidden">
+    <div class="grip" id="lobbyGrip"></div>
+    <div class="panel-head">
+      <div class="code">Code<b id="lobbyCode"></b></div>
+      <button id="btnShare" class="small">📤 Inviter</button>
+      <button id="btnLeave" class="small ghost">Quitter</button>
+    </div>
+
+    <h3>Joueurs <span id="counts" class="muted"></span></h3>
+    <p id="roleHelp" class="muted"></p>
+    <ul id="playerList"></ul>
+
+    <h3>Règles de la partie</h3>
+    <div class="grid">
+      <label>Nombre de trésors<input id="s_treasureCount" type="number" inputmode="numeric"></label>
+      <label>Temps pour se cacher (min)<input id="s_hideTime" type="number" inputmode="numeric"></label>
+      <label>Durée de la chasse (min)<input id="s_duration" type="number" inputmode="numeric"></label>
+      <label>Rayon de départ (m)<input id="s_radius" type="number" inputmode="numeric"></label>
+      <label>Rayon final (m)<input id="s_finalRadius" type="number" inputmode="numeric"></label>
+      <label>Rétrécit toutes les (min)<input id="s_zoneInterval" type="number" inputmode="numeric"></label>
+      <label>Distance de capture (m)<input id="s_captureDist" type="number" inputmode="numeric"></label>
+      <label>Délai hors zone (s)<input id="s_grace" type="number" inputmode="numeric"></label>
+      <label>Trésor capturé…<select id="s_captureMode">
+        <option value="convert">devient chercheur</option>
+        <option value="eliminate">est éliminé</option>
+      </select></label>
+    </div>
+    <p id="schedule" class="muted"></p>
+
+    <button id="btnStart" class="primary wide host-only">🚀 Lancer la partie</button>
+    <p id="waitInfo" class="muted center">En attente du lancement par l'hôte…</p>
+
+    <details class="rules">
+      <summary>Comment jouer ?</summary>
+      <ul>
+        <li>L'<b>hôte</b> choisit les trésors (bouton 💎 / 🔎 à côté de chaque joueur).</li>
+        <li><b>Phase de cache</b> : les trésors partent se cacher, les chercheurs attendent au point de départ.</li>
+        <li>Chaque <b>💎 trésor</b> reçoit <b>sa propre zone</b> (cercle de couleur). Il est dedans, mais jamais au centre.</li>
+        <li>Les zones <b>rétrécissent à intervalles réguliers</b>. La nouvelle zone contient toujours le trésor.</li>
+        <li>Les trésors voient <b>les chercheurs en temps réel</b>. Ils doivent rester dans leur zone et garder le GPS allumé, sinon leur position est révélée.</li>
+        <li>Les <b>🔎 chercheurs</b> ne voient que les zones. Il faut s'approcher à 20 m pour <b>CAPTURER</b>. Un essai raté coûte 10 s : le bouton ne sert pas de détecteur !</li>
+        <li>Les chercheurs gagnent s'ils capturent tous les trésors. Sinon, les trésors gagnent à la fin du chrono.</li>
+      </ul>
+    </details>
+  </section>
+
+  <!-- ===== Jeu ===== -->
+  <div id="hud" class="hidden">
+    <div class="hud-stack">
+      <div class="hud-top">
+        <span id="roleBadge" class="badge"></span>
+        <span id="timer" class="pill">--:--</span>
+        <span id="zoneInfo" class="pill"></span>
+      </div>
+      <div id="legend" class="legend"></div>
+      <div id="phase" class="phase hidden"></div>
+      <div id="warn" class="warn hidden"></div>
+    </div>
+    <div id="net" class="net hidden">🔌 Reconnexion…</div>
+    <div id="feed" class="feed hidden">
+      <div id="feedList"></div>
+      <label class="mute"><input type="checkbox" id="mute"> Couper les sons</label>
+      <button id="btnLeave2" class="small ghost wide">Quitter la partie</button>
+    </div>
+    <div class="hud-bottom">
+      <button id="btnFeed" class="round" title="Événements">📜</button>
+      <button id="btnCapture" class="capture hidden">CAPTURER</button>
+      <div class="col">
+        <button id="btnZone" class="round" title="Voir les zones">⭕</button>
+        <button id="btnMe" class="round" title="Me centrer">🎯</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Fin ===== -->
+  <section id="end" class="screen hidden">
+    <div class="card">
+      <h1 id="endTitle"></h1>
+      <p id="endSub" class="sub"></p>
+      <div id="awards" class="awards"></div>
+      <ul id="endStats" class="stats"></ul>
+      <button id="btnReplay" class="primary">↩️ Retour au salon</button>
+      <button id="btnQuit" class="ghost wide">Quitter</button>
+    </div>
+  </section>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script src="app.js"></script>
+</body>
+</html>

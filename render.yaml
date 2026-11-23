@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: chasse-au-tresor
+    runtime: node
+    plan: free
+    buildCommand: ""
+    startCommand: node server.js
